@@ -1,66 +1,97 @@
 #%%
 import pandas as pd
 from sklearn.pipeline import Pipeline
-from sklearn.preprocessing import StandardScaler, PolynomialFeatures
+from sklearn.preprocessing import PolynomialFeatures
 from sklearn.linear_model import Ridge
-from sklearn.model_selection import GridSearchCV, cross_val_score
+from sklearn.ensemble import RandomForestRegressor
+from sklearn.model_selection import GridSearchCV
 from sklearn.metrics import r2_score
+from joblib import dump
 
-# Load datasets
-
-#carregar os dados
+# Dar load nos datasets
 data = pd.read_csv("train_FuelConsumption.csv")
-
-#carregar os dados de teste
 test_data = pd.read_csv("test_simul_FuelConsumption.csv")
 
-# variáveis dependentes e independentes
-num_cols = data.select_dtypes(include='number').columns
-features = [col for col in num_cols if col != 'CO2EMISSIONS']
+features = [
+    'ENGINESIZE',
+    'CYLINDERS',
+    'FUELCONSUMPTION_CITY',
+    'FUELCONSUMPTION_HWY',
+    'FUELCONSUMPTION_COMB',
+    'FUELCONSUMPTION_COMB_MPG'
+]
 X = data[features]
 y = data['CO2EMISSIONS']
 X_test = test_data[features]
 y_test = test_data['CO2EMISSIONS']
 
-# GridSearchCV para otimizar Ridge com PolynomialFeatures
-print("=== Otimizando modelo com GridSearchCV ===")
+# Definir modelos e parâmetros
+models = [
+    {
+        'name': 'Ridge',
+        'pipeline': Pipeline([
+            ('poly', PolynomialFeatures()),
+            ('regressor', Ridge())
+        ]),
+        'params': {
+            'poly__degree': [2, 3, 4],
+            'regressor__alpha': [0.001, 0.01, 0.1, 0.5, 1, 5, 10]
+        }
+    },
+    {
+        'name': 'RandomForest',
+        'pipeline': RandomForestRegressor(random_state=42),
+        'params': {
+            'n_estimators': [100, 200],
+            'max_depth': [10, 20, None],
+            'min_samples_split': [2, 5]
+        }
+    }
+]
 
-param_grid = {
-    'poly__degree': [2, 3, 4,5,6,7],
-    'regressor__alpha': [0.001, 0.01, 0.1, 0.5, 1,2,3,4, 5, 10]
-}
+# Treinar, comparar e guardar modelos (o grid já faz cross-validation por si só)
+results = []
 
-pipeline = Pipeline([
-    ('poly', PolynomialFeatures()),
-    ('scaler', StandardScaler()),
-    ('regressor', Ridge())
-])
+for model_config in models:
+    
+    grid_search = GridSearchCV(
+        model_config['pipeline'],
+        model_config['params'],
+        cv=5,
+        scoring='r2',
+        n_jobs=-1,
+        verbose=1
+    )
+    
+    grid_search.fit(X, y)
+    
+    # Avaliar no test_simul
+    y_pred = grid_search.predict(X_test)
+    r2_test = r2_score(y_test, y_pred)
+    
+    # Guardar o melhor modelo encontrado
+    model_filename = f"trained_model_{model_config['name']}.joblib"
+    dump(grid_search.best_estimator_, model_filename)
+    print(f"Modelo {model_config['name']} guardado como {model_filename}")
+    
+    results.append({
+        'name': model_config['name'],
+        'best_params': grid_search.best_params_,
+        'cv_r2': grid_search.best_score_,
+        'test_r2': r2_test,
+        'model': grid_search
+    })
 
-grid_search = GridSearchCV(
-    pipeline,
-    param_grid,
-    cv=5,
-    scoring='r2',
-    n_jobs=-1,
-    verbose=1
-)
+# Comparação final
+print("\n" + "="*50)
+print("COMPARAÇÃO FINAL")
+print("="*50)
 
-grid_search.fit(X, y)
+for result in results:
+    print(f"\n{result['name']}:")
+    print(f"  CV R2: {result['cv_r2']:.4f}")
+    print(f"  Test R2: {result['test_r2']:.4f}")
 
-# Resultados do GridSearchCV (com cross-validation)
-print(f"\nBest parameters: {grid_search.best_params_}")
-print(f"Best CV R2 score: {grid_search.best_score_:.4f}")
-
-# Cross-validation detalhada do melhor modelo
-best_model = grid_search.best_estimator_
-cv_scores = cross_val_score(best_model, X, y, cv=5, scoring='r2')
-print(f"\nCross-validation scores (5 folds): {cv_scores}")
-print(f"Mean CV score: {cv_scores.mean():.4f}")
-print(f"Std CV score: {cv_scores.std():.4f}")
-
-# Avaliar no test_simul
-y_pred = grid_search.predict(X_test)
-r2 = r2_score(y_test, y_pred)
-print(f"\nR2 Score on Test_Simul: {r2:.4f}")
-
+best_result = max(results, key=lambda x: x['test_r2'])
+print(f"\n Melhor modelo: {best_result['name']} (Test R2 = {best_result['test_r2']:.4f})")
 # %%
