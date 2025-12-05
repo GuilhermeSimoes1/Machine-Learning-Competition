@@ -94,4 +94,7 @@ for result in results:
 
 best_result = max(results, key=lambda x: x['test_r2'])
 print(f"\n Melhor modelo: {best_result['name']} (Test R2 = {best_result['test_r2']:.4f})")
+
+
+# NOTA: O random forest teve melhor desempenho no test_simul, mas não poderá ser usado na competição, pois não foi abordado nas aulas.
 # %%
